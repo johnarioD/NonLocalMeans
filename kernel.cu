@@ -118,7 +118,7 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     err = cudaMalloc((void**)&d_image, size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_image malloc\n" << cudaGetErrorString(err) << "\n";
     err = cudaMalloc((void**)&d_means, size * sizeof(float));
-    if (err != cudaSuccess) printf("Error at d_image malloc\n%s\n", cudaGetErrorString(err));
+    if (err != cudaSuccess) printf("Error at d_means malloc\n%s\n", cudaGetErrorString(err));
     err = cudaMalloc((void**)&d_Wi, grid.y * size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_Wi malloc\n" << cudaGetErrorString(err) << "\n";
     err = cudaMalloc((void**)&d_Zi, grid.y * sizeof(float));
@@ -134,7 +134,7 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     //
     cuMeans << <grid.x, TpB >> > (d_image, d_means, size, batch_size, stride);
     err = cudaGetLastError();
-    if (err != cudaSuccess) printf("Error at cuFirstPart\n%s\n", cudaGetErrorString(err));
+    if (err != cudaSuccess) printf("Error at cuMeans\n%s\n", cudaGetErrorString(err));
     
     //-------------------------------------------------------------------------------------------------
     //
