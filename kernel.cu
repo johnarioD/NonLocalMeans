@@ -143,7 +143,7 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
         //-------------------------------------------------------------------------------------------------
         //
         //      CALCULATE:
-        //       Wi = |Ni - Nj|;
+        //       Wi = |Ni - Nj|^2;
         //       Wi = Wi./sigma^2;
         //       Wi = exp(Wi);
         //
