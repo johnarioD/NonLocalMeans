@@ -1,4 +1,4 @@
-﻿#include "cuda_runtime.h"
+#include "cuda_runtime.h"
 #include "device_launch_parameters.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -89,26 +89,23 @@ void writecsv(float* A, char* name, int size, int stride) {
 --------------------------------------------------------------------------------------------------------------------------*/
 void NLM(float* image, float* clearImage, int size, int stride, int batch_size, float sigma) {
 
+    float* Wi;
+    struct timespec ts_start, ts_end;
+    cudaError_t err = cudaSuccess;
+    
     int TpB = 1024;
     int blocksPerPixel = (size - 1) / TpB + 1;
     int concurrentPixels = 65536 / blocksPerPixel;
     if (size < concurrentPixels) {
         concurrentPixels = size;
     }
-    dim3 grid(blocksPerPixel, concurrentPixels);
-
-
+    dim3 grid(blocksPerPixel, concurrentPixels);    
+    dim3 sumGrid(grid.x / 2, grid.y);
     //-------------------------------------------------------------------------------------------------
     //
     //     MALLOCS:
     //
-    cudaError_t err = cudaSuccess;
-    struct timespec ts_start, ts_end;
-    dim3 sumGrid(grid.x / 2, grid.y);
-
-    float* Wi, * Zi;
     Wi = (float*)malloc(grid.y * size * sizeof(float));
-    Zi = (float*)malloc(grid.y * sizeof(float));
 
     float* d_image = NULL;
     float* d_means = NULL;
@@ -118,7 +115,7 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     err = cudaMalloc((void**)&d_image, size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_image malloc\n" << cudaGetErrorString(err) << "\n";
     err = cudaMalloc((void**)&d_means, size * sizeof(float));
-    if (err != cudaSuccess) printf("Error at d_means malloc\n%s\n", cudaGetErrorString(err));
+    if (err != cudaSuccess) cout << "Error at d_means malloc\n" << cudaGetErrorString(err) <<"\n";
     err = cudaMalloc((void**)&d_Wi, grid.y * size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_Wi malloc\n" << cudaGetErrorString(err) << "\n";
     err = cudaMalloc((void**)&d_Zi, grid.y * sizeof(float));
@@ -144,12 +141,12 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
         printf("Pixels %d-%d\n", pixel, pixel + grid.y - 1);
 
         //-------------------------------------------------------------------------------------------------
-       //
-       //      CALCULATE:
-       //       Wi = |Ni - Nj|;
-       //       Wi = Wi./sigma^2;
-       //       Wi = exp(Wi);
-       //
+        //
+        //      CALCULATE:
+        //       Wi = |Ni - Nj|;
+        //       Wi = Wi./sigma^2;
+        //       Wi = exp(Wi);
+        //
         cuFirstPart << <grid, TpB >> > (d_means, d_Wi, size, sigma, pixel);
         err = cudaGetLastError();
         if (err != cudaSuccess) cout << "Error at cuFirstPart\n" << cudaGetErrorString(err) << "\n";
@@ -190,14 +187,12 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
         cuBlockSum << <sumGrid.y, sumGrid.x / 2 >> > (d_Wi, d_Zi, size, 2 * TpB);
         err = cudaGetLastError();
         if (err != cudaSuccess) cout << "Error at second cuBlockSum\n" << cudaGetErrorString(err) << "\n";
-
-        err = cudaMemcpy(Zi, d_Zi, grid.y * sizeof(float), cudaMemcpyDeviceToHost);
-        if (err != cudaSuccess) cout << "Error at Zi memcpy\n" << cudaGetErrorString(err) << "\n";
         //-------------------------------------------------------------------------------------------------
         //
         //      COPY RESULTS:
         //
-        memcpy(clearImage + pixel, Zi, grid.y * sizeof(float));
+        err = cudaMemcpy(clearImage + pixel, d_Zi, grid.y * sizeof(float), cudaMemcpyDeviceToHost);
+        if (err != cudaSuccess) cout << "Error at Zi memcpy\n" << cudaGetErrorString(err) << "\n";
         //-------------------------------------------------------------------------------------------------
     }
   	clock_gettime(CLOCK_MONOTONIC, &ts_end);
@@ -218,7 +213,6 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     if (err != cudaSuccess) cout << "Error at d_Wi free\n" << cudaGetErrorString(err) << "\n";
     err = cudaFree(d_Zi);
     if (err != cudaSuccess) cout << "Error at d_Zi free\n" << cudaGetErrorString(err) << "\n";
-    free(Zi);
     free(Wi);
 
     cout << "Time:" << ts_end.tv_sec - ts_start.tv_sec << "." << abs(ts_end.tv_nsec - ts_start.tv_nsec)) << "\n";
