@@ -212,6 +212,8 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     //
     err = cudaFree(d_image);
     if (err != cudaSuccess) cout << "Error at d_image free\n" << cudaGetErrorString(err) << "\n";
+    err = cudaFree(d_means);
+    if (err != cudaSuccess) cout << "Error at d_means free\n" << cudaGetErrorString(err) << "\n";
     err = cudaFree(d_Wi);
     if (err != cudaSuccess) cout << "Error at d_Wi free\n" << cudaGetErrorString(err) << "\n";
     err = cudaFree(d_Zi);
@@ -248,7 +250,6 @@ __global__ void cuMeans(float* image, float* means, int size, int batch_size, in
             }
         }
         means[center] /= count;
-        if (center == 0) printf("%d\n", count);
     }
 }
 
