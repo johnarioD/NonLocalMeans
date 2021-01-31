@@ -8,7 +8,8 @@
 
 using namespace std;
 
-__global__ void cuFirstPart(float* image, float* Wi, int size, int batch_size, int stride, float sigma, int pixel);
+__global__ void cuMeans(float* image, float* means, int size, int batch_size, int stride);
+__global__ void cuFirstPart(float* means, float* Wi, int size, float sigma, int pixel);
 __global__ void cuSum(float* Wi, int size);
 __global__ void cuBlockSum(float* Wi, float* Zi, int size, int length);
 __global__ void cuThirdPart(float* image, float* Wi, float* div, int size);
@@ -110,11 +111,14 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     Zi = (float*)malloc(grid.y * sizeof(float));
 
     float* d_image = NULL;
+    float* d_means = NULL;
     float* d_Wi = NULL;
     float* d_Zi = NULL;
 
     err = cudaMalloc((void**)&d_image, size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_image malloc\n" << cudaGetErrorString(err) << "\n";
+    err = cudaMalloc((void**)&d_means, size * sizeof(float));
+    if (err != cudaSuccess) printf("Error at d_image malloc\n%s\n", cudaGetErrorString(err));
     err = cudaMalloc((void**)&d_Wi, grid.y * size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_Wi malloc\n" << cudaGetErrorString(err) << "\n";
     err = cudaMalloc((void**)&d_Zi, grid.y * sizeof(float));
@@ -122,23 +126,31 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
 
     err = cudaMemcpy(d_image, image, size * sizeof(float), cudaMemcpyHostToDevice);
     if (err != cudaSuccess) cout << "Error at d_image memcpy\n" << cudaGetErrorString(err) << "\n";
-
+    
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+    //-------------------------------------------------------------------------------------------------
+    // 
+    //     FIND MEANS:
+    //
+    cuMeans << <grid.x, TpB >> > (d_image, d_means, size, batch_size, stride);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) printf("Error at cuFirstPart\n%s\n", cudaGetErrorString(err));
+    
     //-------------------------------------------------------------------------------------------------
     //
     //     ITERATE PIXELS:
     //
-    clock_gettime(CLOCK_MONOTONIC, &ts_start);
     for (int pixel = 0; pixel < size; pixel += grid.y) {
         printf("Pixels %d-%d\n", pixel, pixel + grid.y - 1);
 
         //-------------------------------------------------------------------------------------------------
        //
        //      CALCULATE:
-       //       Wi = norm(Ni - Nj);
+       //       Wi = |Ni - Nj|;
        //       Wi = Wi./sigma^2;
        //       Wi = exp(Wi);
        //
-        cuFirstPart << <grid, TpB >> > (d_image, d_Wi, size, batch_size, stride, sigma, pixel);
+        cuFirstPart << <grid, TpB >> > (d_means, d_Wi, size, sigma, pixel);
         err = cudaGetLastError();
         if (err != cudaSuccess) cout << "Error at cuFirstPart\n" << cudaGetErrorString(err) << "\n";
 
@@ -215,58 +227,44 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
 *       CUDA KERNELS:
 *
 --------------------------------------------------------------------------------------------------------------------------*/
-__global__ void cuFirstPart(float* image, float* Wi, int size, int batch_size, int stride, float sigma, int pixel) {
+__global__ void cuMeans(float* image, float* means, int size, int batch_size, int stride) {
+    int center = blockDim.x * blockIdx.x + threadIdx.x;
 
+    if (center < size) {
+        int top = center/stride;
+        int left = center - top*stride;
+        top -= batch_size / 2;
+        left -= batch_size / 2;
+
+        float count = 0;
+        means[center] = 0;
+        for (int Y = top; Y < top + batch_size; Y++) {
+            for (int X = left; X < left + batch_size; X++) {
+                if ((X >= 0) && (X < stride)
+                   &&(Y >= 0) && (Y < stride)) {
+                    means[center] += image[Y*stride + X];
+                    count++;
+                }
+            }
+        }
+        means[center] /= count;
+        if (center == 0) printf("%d\n", count);
+    }
+}
+
+__global__ void cuFirstPart(float* means, float* Wi, int size, float sigma, int pixel) {
     int j = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (j < size) {
         int rowStart = blockIdx.y * size;
         int center = blockIdx.y + pixel;
 
-        int rowI, colI, rowJ, colJ;
-        Wi[rowStart + j] = 0;
+        Wi[rowStart + j] = (means[center] - means[j])* (means[center] - means[j]);
 
-        rowI = center / stride;
-        colI = center - rowI * stride;
-        rowJ = j / stride;
-        colJ = j - rowJ * stride;
-
-        colI -= batch_size / 2;
-        rowI -= batch_size / 2;
-        colJ -= batch_size / 2;
-        rowJ -= batch_size / 2;
-
-        for (int X = 0; X < batch_size; X++) {
-            for (int Y = 0; Y < batch_size; Y++) {
-                float Ni = 0;
-                float Nj = 0;
-
-                if (rowI + X >= 0){
-                    if (colI + Y >= 0) {
-                        if (rowI + X < stride) {
-                            if (colI + Y < stride) {
-                                Ni = image[(rowI + X) * stride + colI + Y];
-                            }
-                        }
-                    }
-                }
-                if (rowJ + X >= 0) {
-                    if (colJ + Y >= 0) {
-                        if (rowJ + X < stride) {
-                            if (colJ + Y < stride) {
-                                Nj = image[(rowJ + X) * stride + colJ + Y];
-                            }
-                        }
-                    }
-                }
-                Wi[rowStart + j] += (Ni - Nj) * (Ni - Nj);
-            }
-        }
         __syncthreads();
         Wi[rowStart + j] = expf(-(Wi[rowStart + j] / (sigma * sigma)));
     }
 }
-
 __global__ void cuSum(float* Wi, int size) {
 
     int i = threadIdx.x;
