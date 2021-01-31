@@ -74,7 +74,8 @@ void writecsv(float* A, char* name, int size, int stride) {
 
     for (int row = 0; row < size / stride; row++) {
         for (int col = 0; col < stride; col++) {
-            out << A[row * stride + col] << ',';
+            out << A[row * stride + col];
+            if(col < stride-1) out << ',';
         }
         out << '\n';
     }
