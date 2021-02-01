@@ -8,7 +8,8 @@
 
 using namespace std;
 
-__global__ void cuMeans(float* image, float* means, int size, int batch_size, int stride);
+__global__ void cuFilter(float* filter, int batch_size);
+__global__ void cuMeans(float* image, float* means, float* filter, int size, int batch_size, int stride);
 __global__ void cuFirstPart(float* means, float* Wi, int size, float sigma, int pixel);
 __global__ void cuSum(float* Wi, int size);
 __global__ void cuBlockSum(float* Wi, float* Zi, int size, int length);
@@ -109,11 +110,14 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
 
     float* d_image = NULL;
     float* d_means = NULL;
+    float* d_filter = NULL;
     float* d_Wi = NULL;
     float* d_Zi = NULL;
 
     err = cudaMalloc((void**)&d_image, size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_image malloc\n" << cudaGetErrorString(err) << "\n";
+    err = cudaMalloc((void**)&d_filter, batch_size * batch_size * sizeof(float));
+    if (err != cudaSuccess) cout << "Error at d_filter malloc\n" << cudaGetErrorString(err) <<"\n";
     err = cudaMalloc((void**)&d_means, size * sizeof(float));
     if (err != cudaSuccess) cout << "Error at d_means malloc\n" << cudaGetErrorString(err) <<"\n";
     err = cudaMalloc((void**)&d_Wi, grid.y * size * sizeof(float));
@@ -129,9 +133,12 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     // 
     //     FIND MEANS:
     //
+    cuFilter<<<batch_size,batch_size>>>(d_filter, batch_size);
+    err = cudaGetLastError();
+    if (err != cudaSuccess) cout << "Error at cuFilter\n" << cudaGetErrorString(err) << "\n";
     cuMeans << <grid.x, TpB >> > (d_image, d_means, size, batch_size, stride);
     err = cudaGetLastError();
-    if (err != cudaSuccess) printf("Error at cuMeans\n%s\n", cudaGetErrorString(err));
+    if (err != cudaSuccess) cout << "Error at cuMeans\n" << cudaGetErrorString(err) << "\n";
     
     //-------------------------------------------------------------------------------------------------
     //
@@ -223,6 +230,14 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
 *       CUDA KERNELS:
 *
 --------------------------------------------------------------------------------------------------------------------------*/
+__global__ void cuFilter(float* filter, int batch_size) {
+    int i = blockDim.x * blockIdx.x + threadIdx.x;
+
+    float x = (blockIdx.x - batch_size / 2) * (blockIdx.x - batch_size / 2);
+    x += (threadIdx.x - batch_size / 2) * (threadIdx.x - batch_size / 2);
+    filter[i] = expf(-x/100);
+}
+
 __global__ void cuMeans(float* image, float* means, int size, int batch_size, int stride) {
     int center = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -238,7 +253,7 @@ __global__ void cuMeans(float* image, float* means, int size, int batch_size, in
             for (int X = left; X < left + batch_size; X++) {
                 if ((X >= 0) && (X < stride)
                    &&(Y >= 0) && (Y < stride)) {
-                    means[center] += image[Y*stride + X];
+                    means[center] += image[Y * stride + X]*filter[(X-left)*batch_size+Y-top];
                     count++;
                 }
             }
