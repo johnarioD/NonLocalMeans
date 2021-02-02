@@ -136,7 +136,7 @@ void NLM(float* image, float* clearImage, int size, int stride, int batch_size, 
     cuFilter<<<batch_size,batch_size>>>(d_filter, batch_size);
     err = cudaGetLastError();
     if (err != cudaSuccess) cout << "Error at cuFilter\n" << cudaGetErrorString(err) << "\n";
-    cuMeans << <grid.x, TpB >> > (d_image, d_means, size, batch_size, stride);
+    cuMeans << <grid.x, TpB >> > (d_image, d_means, d_filter, size, batch_size, stride);
     err = cudaGetLastError();
     if (err != cudaSuccess) cout << "Error at cuMeans\n" << cudaGetErrorString(err) << "\n";
     
@@ -238,7 +238,7 @@ __global__ void cuFilter(float* filter, int batch_size) {
     filter[i] = expf(-x/100);
 }
 
-__global__ void cuMeans(float* image, float* means, int size, int batch_size, int stride) {
+__global__ void cuMeans(float* image, float* means, float* filter, int size, int batch_size, int stride) {
     int center = blockDim.x * blockIdx.x + threadIdx.x;
 
     if (center < size) {
